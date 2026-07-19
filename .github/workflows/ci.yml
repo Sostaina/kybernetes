@@ -1,0 +1,23 @@
+name: ci
+# Rigor por bucle de control: tipos + tests + fronteras + build en cada PR y push.
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm lint:boundaries # las fronteras: falla si un import cruza ilegalmente
+      - run: pnpm build

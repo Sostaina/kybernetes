@@ -1,0 +1,66 @@
+name: release
+# Fase LIBERAR con changesets, SIN que Actions cree PRs (esquiva el candado de la org):
+# el bump de versión se commitea directo a main. Ver docs/SETUP.md.
+on:
+  push:
+    branches: [main]
+
+concurrency: release-${{ github.workflow }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+      - run: pnpm install --frozen-lockfile
+
+      - name: identidad git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Si hay changesets pendientes: sube versiones + CHANGELOG y commitea directo a main.
+      # El [skip ci] evita re-disparar. (Push con GITHUB_TOKEN no re-dispara workflows.)
+      - name: versionar
+        id: version
+        run: |
+          if ls .changeset/*.md 2>/dev/null | grep -qv 'README.md'; then
+            pnpm changeset version
+            git add -A
+            git commit -m "chore(release): version packages [skip ci]"
+            git push origin HEAD:main
+            echo "versioned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Sin changesets — nada que versionar."
+            echo "versioned=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Publica los paquetes cuya versión cambió (los private se saltean solos).
+      - name: publicar
+        run: pnpm release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Trae el bump de vuelta a dev para que no quede desfasado.
+      - name: back-merge a dev
+        if: steps.version.outputs.versioned == 'true'
+        run: |
+          git fetch origin dev main
+          git checkout -B dev origin/dev
+          if git merge --no-ff -m "chore(release): back-merge del bump a dev [skip ci]" origin/main; then
+            git push origin dev
+          else
+            echo "::warning::Back-merge a dev con conflicto — resolver a mano (main ya quedó publicado)."
+          fi
